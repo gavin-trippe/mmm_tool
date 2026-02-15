@@ -264,7 +264,7 @@ if view_mode == "Internal":
 
     # -- Maintenance section --
     st.sidebar.markdown('<div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.1em; color:#94a3b8; padding:0.75rem 1rem 0.25rem; border-top:1px solid #e2e8f0; margin-top:0.5rem;">Maintenance</div>', unsafe_allow_html=True)
-    for p in ["Data Freshness", "Campaign Mapping", "Data Audit", "Clean Export", "Settings"]:
+    for p in ["Data Freshness", "Campaign Mapping", "Spike Analysis", "Data Audit", "Clean Export", "Settings"]:
         css_class = "nav-btn-active" if st.session_state.current_page == p else "nav-btn"
         st.sidebar.markdown(f'<div class="{css_class}">', unsafe_allow_html=True)
         if st.sidebar.button(p, key=f"nav_{p}", use_container_width=True):
@@ -1083,6 +1083,97 @@ elif page == "Clean Export":
         if st.button("Save Snapshot (for Audit)", use_container_width=True):
             save_export_snapshot(CLIENT, clean_df)
             st.success("Snapshot saved")
+
+
+# ==========================================================
+# PAGE: Spike Analysis (Dependent Variables)
+# ==========================================================
+elif page == "Spike Analysis":
+
+    dep_vars = config.get("dependent_variables", [])
+    clean_df, _ = build_clean_output(raw_df, saved_mappings, ignored_list, config)
+
+    # Hero
+    st.markdown("""
+    <div style="background:linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border:1px solid #fdba74;
+                border-radius:16px; padding:2rem 2.5rem; margin-bottom:2rem; position:relative; overflow:hidden;">
+        <div style="font-size:1.6rem; font-weight:800; color:#0f172a; letter-spacing:-0.03em;">
+            Spike Analysis
+        </div>
+        <div style="font-size:0.95rem; color:#9a3412; margin-top:0.35rem; font-weight:500;">
+            Identify spikes in dependent variables to inform MMM priors
+        </div>
+        <div style="position:absolute; top:-20px; right:-20px; width:120px; height:120px;
+                    border-radius:50%; background:rgba(255,255,255,0.4);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    dev_info(
+        "Spike Analysis Page",
+        "Displays daily time series for each dependent variable (e.g., acquisition, winbacks) so the analyst can "
+        "visually identify spikes. Spike dates are used to set priors in the MMM (Recast). Hover over the chart "
+        "to see exact date and value. Only dependent variables are shown here -- tactic spend spikes are not relevant for priors.",
+        functions=[
+            "build_clean_output(raw_df, saved_mappings, ignored_list, config) -- generates the clean daily export with dep var columns",
+        ],
+        data_flow="Clean export (date + dep var columns) -> filter by export window -> line chart per dep var. "
+                   "Analyst hovers to find spike dates, then uses those dates when configuring priors in Recast."
+    )
+
+    if not dep_vars:
+        st.markdown("""
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:2.5rem; text-align:center;">
+            <div style="font-size:1.3rem; color:#94a3b8; margin-bottom:0.5rem;">No Dependent Variables</div>
+            <div style="font-size:0.9rem; color:#64748b;">Add dependent variables in Settings first</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        depvar_cols = [c for c in clean_df.columns if c in dep_vars]
+
+        if not depvar_cols:
+            st.info("No dependent variable data in the clean export yet. Map campaigns to dep vars first.")
+        else:
+            chart_df = clean_df[["date"] + depvar_cols].copy()
+            chart_df["date"] = pd.to_datetime(chart_df["date"])
+            chart_df = chart_df.sort_values("date")
+
+            for dv in depvar_cols:
+                series = chart_df[["date", dv]].copy()
+                total = series[dv].sum()
+                avg = series[dv].mean()
+                peak_val = series[dv].max()
+                peak_date = series.loc[series[dv].idxmax(), "date"].strftime("%Y-%m-%d") if peak_val > 0 else "--"
+
+                st.markdown(f"""
+                <div style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid #f97316;
+                            border-radius:12px; padding:1.25rem 1.5rem; margin-bottom:0.5rem;
+                            box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+                        <div style="font-weight:700; font-size:1rem; color:#0f172a;">{dv.replace('_', ' ').title()}</div>
+                        <div style="display:flex; gap:1.5rem;">
+                            <div style="text-align:center;">
+                                <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Total</div>
+                                <div style="font-size:1rem; font-weight:700; color:#0f172a;">{total:,.0f}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Daily Avg</div>
+                                <div style="font-size:1rem; font-weight:700; color:#0f172a;">{avg:,.1f}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Peak</div>
+                                <div style="font-size:1rem; font-weight:700; color:#f97316;">{peak_val:,.0f}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Peak Date</div>
+                                <div style="font-size:1rem; font-weight:700; color:#f97316;">{peak_date}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.line_chart(series.set_index("date"), height=280, use_container_width=True)
+                st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
 
 
 # ==========================================================
