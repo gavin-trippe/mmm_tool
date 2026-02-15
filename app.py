@@ -2074,21 +2074,35 @@ elif page == "Client Dashboard":
 
     # ---- Dependent Variables summary ----
     if depvar_cols:
-        st.markdown("""
-        <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
-            Dependent Variables (Outcomes)
-        </div>
-        <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
-            KPIs being modeled -- acquisition, retention, etc.
-        </div>
-        """, unsafe_allow_html=True)
+        dv_header_c1, dv_header_c2 = st.columns([3, 1])
+        with dv_header_c1:
+            st.markdown("""
+            <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+                Dependent Variables (Outcomes)
+            </div>
+            <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.5rem;">
+                KPIs being modeled -- acquisition, retention, etc.
+            </div>
+            """, unsafe_allow_html=True)
+        with dv_header_c2:
+            dv_window = st.selectbox("Date Range", ["Last 30 Days", "Last 60 Days", "Last 90 Days", "Last 365 Days", "All Time"],
+                                     key="client_dv_window", label_visibility="collapsed")
+
+        dv_days_map = {"Last 30 Days": 30, "Last 60 Days": 60, "Last 90 Days": 90, "Last 365 Days": 365, "All Time": None}
+        dv_days = dv_days_map[dv_window]
+        if dv_days and len(clean_df) > 0:
+            dv_max_date = pd.to_datetime(clean_df["date"]).max()
+            dv_cutoff = dv_max_date - pd.Timedelta(days=dv_days)
+            dv_df = clean_df[pd.to_datetime(clean_df["date"]) > dv_cutoff]
+        else:
+            dv_df = clean_df
 
         dv_cards_html = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:1rem;">'
         dv_colors = ["#7c3aed", "#a855f7", "#c084fc", "#d8b4fe"]
         for i, dv in enumerate(depvar_cols):
-            dv_total = clean_df[dv].sum()
-            avg_daily = clean_df[dv].mean()
-            zero_days = int((clean_df[dv] == 0).sum())
+            dv_total = dv_df[dv].sum()
+            avg_daily = dv_df[dv].mean()
+            zero_days = int((dv_df[dv] == 0).sum())
             color = dv_colors[i % len(dv_colors)]
             dv_cards_html += f"""
             <div style="background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:1.5rem;
