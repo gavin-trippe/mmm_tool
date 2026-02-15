@@ -2127,6 +2127,41 @@ elif page == "Client Dashboard":
 
         st.markdown('<div style="height:2rem;"></div>', unsafe_allow_html=True)
 
+    # ---- Dependent Variable Spike Analysis ----
+    if depvar_cols:
+        st.markdown("""
+        <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+            Dependent Variable Trends
+        </div>
+        <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
+            Daily time series -- hover to identify spike dates for MMM priors
+        </div>
+        """, unsafe_allow_html=True)
+
+        chart_src = clean_df[["date"] + depvar_cols].copy()
+        chart_src["date"] = pd.to_datetime(chart_src["date"])
+        chart_src = chart_src.sort_values("date")
+
+        for dv in depvar_cols:
+            series = chart_src[["date", dv]].copy()
+            peak_val = series[dv].max()
+            peak_date = series.loc[series[dv].idxmax(), "date"].strftime("%Y-%m-%d") if peak_val > 0 else "--"
+
+            st.markdown(f"""
+            <div style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid #f97316;
+                        border-radius:12px; padding:1rem 1.25rem; margin-bottom:0.5rem;
+                        box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:700; color:#0f172a;">{dv.replace('_', ' ').title()}</span>
+                    <span style="font-size:0.8rem; color:#94a3b8;">Peak: <span style="color:#f97316; font-weight:700;">{peak_val:,.0f}</span> on {peak_date}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.line_chart(series.set_index("date"), height=250, use_container_width=True)
+            st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="height:1rem;"></div>', unsafe_allow_html=True)
+
     # ---- Campaign mapping table ----
     st.markdown("""
     <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
