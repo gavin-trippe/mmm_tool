@@ -2016,17 +2016,31 @@ elif page == "Client Dashboard":
     st.markdown(dq_html, unsafe_allow_html=True)
 
     # ---- Spend by tactic (horizontal bars via HTML) ----
-    st.markdown("""
-    <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
-        Media Spend Breakdown
-    </div>
-    <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
-        Total spend per tactic going into Recast
-    </div>
-    """, unsafe_allow_html=True)
+    spend_header_c1, spend_header_c2 = st.columns([3, 1])
+    with spend_header_c1:
+        st.markdown("""
+        <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+            Media Spend Breakdown
+        </div>
+        <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:0.5rem;">
+            Total spend per tactic going into Recast
+        </div>
+        """, unsafe_allow_html=True)
+    with spend_header_c2:
+        spend_window = st.selectbox("Date Range", ["Last 30 Days", "Last 60 Days", "Last 90 Days", "Last 365 Days", "All Time"],
+                                    key="client_spend_window", label_visibility="collapsed")
+
+    spend_days_map = {"Last 30 Days": 30, "Last 60 Days": 60, "Last 90 Days": 90, "Last 365 Days": 365, "All Time": None}
+    spend_days = spend_days_map[spend_window]
+    if spend_days and len(clean_df) > 0:
+        max_date = pd.to_datetime(clean_df["date"]).max()
+        cutoff = max_date - pd.Timedelta(days=spend_days)
+        spend_df = clean_df[pd.to_datetime(clean_df["date"]) > cutoff]
+    else:
+        spend_df = clean_df
 
     if tactic_cols:
-        tactic_totals = clean_df[tactic_cols].sum().sort_values(ascending=False)
+        tactic_totals = spend_df[tactic_cols].sum().sort_values(ascending=False)
         max_val = tactic_totals.max() if tactic_totals.max() > 0 else 1
         colors = ["#6366f1", "#3b82f6", "#8b5cf6", "#10b981", "#f59e0b", "#ec4899",
                   "#14b8a6", "#f97316", "#06b6d4", "#84cc16", "#a855f7", "#ef4444",
