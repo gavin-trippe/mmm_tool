@@ -2057,22 +2057,11 @@ elif page == "Client Dashboard":
                 continue
             if target not in tactic_campaigns:
                 tactic_campaigns[target] = []
-            # Get spend for this campaign in the filtered date range
-            camp_spend = spend_df[spend_df.index.isin(
-                raw_df[raw_df["raw_campaign_name"] == camp_name].merge(
-                    spend_df[["date"]], left_on="date", right_on="date", how="inner"
-                ).index
-            )].shape[0]  # placeholder
             camp_val = raw_df[raw_df["raw_campaign_name"] == camp_name]
             if spend_days and len(camp_val) > 0:
-                camp_max = pd.to_datetime(camp_val["date"]).max()
-                camp_cutoff = camp_max - pd.Timedelta(days=spend_days) if spend_days else None
-                if camp_cutoff:
-                    camp_val = camp_val[pd.to_datetime(camp_val["date"]) > (pd.to_datetime(raw_df["date"]).max() - pd.Timedelta(days=spend_days))]
-            camp_total = camp_val["daily_value"].sum()
-            tactic_campaigns[target].append({"name": camp_name, "spend": camp_total})
+                camp_val = camp_val[pd.to_datetime(camp_val["date"]) > (pd.to_datetime(raw_df["date"]).max() - pd.Timedelta(days=spend_days))]
+            tactic_campaigns[target].append({"name": camp_name, "spend": camp_val["daily_value"].sum()})
 
-        # Also pick up default mappings from RAW_CAMPAIGNS
         for ch, ch_data in RAW_CAMPAIGNS.items():
             for camp in ch_data["campaigns"]:
                 raw_name = camp["raw_name"]
@@ -2081,48 +2070,58 @@ elif page == "Client Dashboard":
                 if mapped_to and camp_type == "tactic" and raw_name not in saved_mappings:
                     if mapped_to not in tactic_campaigns:
                         tactic_campaigns[mapped_to] = []
-                    camp_val = raw_df[raw_df["raw_campaign_name"] == raw_name]
-                    if spend_days and len(camp_val) > 0:
-                        camp_val = camp_val[pd.to_datetime(camp_val["date"]) > (pd.to_datetime(raw_df["date"]).max() - pd.Timedelta(days=spend_days))]
-                    camp_total = camp_val["daily_value"].sum()
-                    # Avoid duplicates
                     if not any(c["name"] == raw_name for c in tactic_campaigns[mapped_to]):
-                        tactic_campaigns[mapped_to].append({"name": raw_name, "spend": camp_total})
+                        camp_val = raw_df[raw_df["raw_campaign_name"] == raw_name]
+                        if spend_days and len(camp_val) > 0:
+                            camp_val = camp_val[pd.to_datetime(camp_val["date"]) > (pd.to_datetime(raw_df["date"]).max() - pd.Timedelta(days=spend_days))]
+                        tactic_campaigns[mapped_to].append({"name": raw_name, "spend": camp_val["daily_value"].sum()})
 
+        # Render bars with expandable campaign detail
+        bars_html = '<div style="background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">'
         for i, (tname, tval) in enumerate(tactic_totals.items()):
             pct = (tval / max_val) * 100
             color = colors[i % len(colors)]
-            camps = tactic_campaigns.get(tname, [])
-            camps_sorted = sorted(camps, key=lambda x: x["spend"], reverse=True)
-
-            with st.expander(f"{tname}  --  ${tval:,.0f}  ({len(camps_sorted)} campaigns)", expanded=False):
-                # Tactic bar
-                st.markdown(f"""
-                <div style="margin-bottom:1rem;">
-                    <div style="background:#f1f5f9; border-radius:6px; height:10px; overflow:hidden;">
-                        <div style="background:{color}; width:{pct:.1f}%; height:100%; border-radius:6px;"></div>
+            camp_count = len(tactic_campaigns.get(tname, []))
+            bars_html += f"""
+            <div style="margin-bottom:{'1rem' if i < len(tactic_totals) - 1 else '0'};">
+                <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.35rem;">
+                    <div style="font-size:0.85rem; font-weight:600; color:#334155;">{tname}</div>
+                    <div style="display:flex; align-items:baseline; gap:0.75rem;">
+                        <span style="font-size:0.7rem; color:#94a3b8;">{camp_count} source(s)</span>
+                        <span style="font-size:0.95rem; font-weight:700; color:#0f172a; font-variant-numeric:tabular-nums;">${tval:,.0f}</span>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                <div style="background:#f1f5f9; border-radius:6px; height:10px; overflow:hidden;">
+                    <div style="background:{color}; width:{pct:.1f}%; height:100%; border-radius:6px;
+                                transition:width 0.6s ease;"></div>
+                </div>
+            </div>"""
+        bars_html += "</div>"
+        st.markdown(bars_html, unsafe_allow_html=True)
 
-                if camps_sorted:
-                    camp_max_val = camps_sorted[0]["spend"] if camps_sorted[0]["spend"] > 0 else 1
-                    rows_html = ""
-                    for c in camps_sorted:
-                        c_pct = (c["spend"] / camp_max_val) * 100 if camp_max_val > 0 else 0
-                        rows_html += f"""
-                        <div style="margin-bottom:0.75rem;">
-                            <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.25rem;">
-                                <div style="font-size:0.8rem; color:#475569; font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:70%;">{c['name']}</div>
-                                <div style="font-size:0.85rem; font-weight:700; color:#0f172a;">${c['spend']:,.0f}</div>
-                            </div>
-                            <div style="background:#f1f5f9; border-radius:4px; height:6px; overflow:hidden;">
-                                <div style="background:{color}; opacity:0.6; width:{c_pct:.1f}%; height:100%; border-radius:4px;"></div>
-                            </div>
-                        </div>"""
-                    st.markdown(f'<div style="padding:0 0.25rem;">{rows_html}</div>', unsafe_allow_html=True)
-                else:
-                    st.caption("No campaigns mapped to this tactic yet.")
+        # Drill-down expander per tactic
+        for i, (tname, tval) in enumerate(tactic_totals.items()):
+            camps = tactic_campaigns.get(tname, [])
+            if not camps:
+                continue
+            camps_sorted = sorted(camps, key=lambda x: x["spend"], reverse=True)
+            color = colors[i % len(colors)]
+            with st.expander(f"{tname} -- {len(camps_sorted)} campaign(s)"):
+                camp_max_val = camps_sorted[0]["spend"] if camps_sorted[0]["spend"] > 0 else 1
+                rows_html = ""
+                for c in camps_sorted:
+                    c_pct = (c["spend"] / camp_max_val) * 100 if camp_max_val > 0 else 0
+                    rows_html += f"""
+                    <div style="margin-bottom:0.75rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.25rem;">
+                            <div style="font-size:0.8rem; color:#475569; font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:70%;">{c['name']}</div>
+                            <div style="font-size:0.85rem; font-weight:700; color:#0f172a;">${c['spend']:,.0f}</div>
+                        </div>
+                        <div style="background:#f1f5f9; border-radius:4px; height:6px; overflow:hidden;">
+                            <div style="background:{color}; opacity:0.6; width:{c_pct:.1f}%; height:100%; border-radius:4px;"></div>
+                        </div>
+                    </div>"""
+                st.markdown(rows_html, unsafe_allow_html=True)
     else:
         st.info("No tactic data available yet.")
 
