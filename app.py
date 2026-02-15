@@ -2168,6 +2168,24 @@ elif page == "Client Dashboard":
 
     mapped_display = pd.DataFrame(mapped_rows)
 
+    # Filters
+    filt_c1, filt_c2, filt_c3 = st.columns([2, 2, 1])
+    with filt_c1:
+        channels_available = sorted(mapped_display["Channel"].unique().tolist())
+        filter_channel = st.multiselect("Filter by Channel", channels_available, default=channels_available, key="client_map_channel")
+    with filt_c2:
+        targets_available = sorted([t for t in mapped_display["Maps To"].unique().tolist() if t != "--"])
+        filter_target = st.multiselect("Filter by Tactic / Dep Var", targets_available, default=[], key="client_map_target",
+                                       placeholder="All tactics")
+    with filt_c3:
+        filter_search = st.text_input("Search", key="client_map_search", placeholder="Campaign name...")
+
+    filtered_display = mapped_display[mapped_display["Channel"].isin(filter_channel)] if filter_channel else mapped_display
+    if filter_target:
+        filtered_display = filtered_display[filtered_display["Maps To"].isin(filter_target)]
+    if filter_search:
+        filtered_display = filtered_display[filtered_display["Raw Campaign"].str.contains(filter_search, case=False, na=False)]
+
     tab_all, tab_mapped, tab_unmapped, tab_excluded = st.tabs(["All Campaigns", "Mapped", "Unmapped", "Excluded"])
     with tab_all:
         def style_status(row):
@@ -2176,17 +2194,17 @@ elif page == "Client Dashboard":
             if row["Status"] == "Unmapped":
                 return ["background:#fef2f2;"] * len(row)
             return [""] * len(row)
-        display = mapped_display.copy()
+        display = filtered_display.copy()
         display["Total Value"] = display["Total Value"].apply(lambda x: f"${x:,.0f}")
         st.dataframe(display.style.apply(style_status, axis=1), use_container_width=True, hide_index=True, height=420)
 
     with tab_mapped:
-        m_df = mapped_display[mapped_display["Status"] == "Mapped"].copy()
+        m_df = filtered_display[filtered_display["Status"] == "Mapped"].copy()
         m_df["Total Value"] = m_df["Total Value"].apply(lambda x: f"${x:,.0f}")
         st.dataframe(m_df, use_container_width=True, hide_index=True, height=420)
 
     with tab_unmapped:
-        u_df = mapped_display[mapped_display["Status"] == "Unmapped"].copy()
+        u_df = filtered_display[filtered_display["Status"] == "Unmapped"].copy()
         if len(u_df):
             u_df["Total Value"] = u_df["Total Value"].apply(lambda x: f"${x:,.0f}")
             st.dataframe(u_df, use_container_width=True, hide_index=True, height=300)
@@ -2200,7 +2218,7 @@ elif page == "Client Dashboard":
             """, unsafe_allow_html=True)
 
     with tab_excluded:
-        e_df = mapped_display[mapped_display["Status"] == "Excluded"].copy()
+        e_df = filtered_display[filtered_display["Status"] == "Excluded"].copy()
         if len(e_df):
             e_df["Total Value"] = e_df["Total Value"].apply(lambda x: f"${x:,.0f}")
             st.dataframe(e_df, use_container_width=True, hide_index=True, height=300)
