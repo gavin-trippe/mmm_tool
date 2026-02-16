@@ -707,21 +707,22 @@ elif page == "Sources":
     </div>
     """, unsafe_allow_html=True)
 
-    sim_colors = ["#6366f1", "#3b82f6", "#8b5cf6", "#0ea5e9", "#10b981", "#7c3aed"]
+    sim_colors = ["#6366f1", "#3b82f6", "#8b5cf6", "#0ea5e9", "#10b981", "#7c3aed", "#f97316", "#ec4899"]
     for idx, (src_name, src_info) in enumerate(SIMULATED_CSV_SOURCES.items()):
         color = sim_colors[idx % len(sim_colors)]
         all_cols = src_info["columns"]
+        is_depvar_source = src_info.get("source_type") == "dependent_variable"
 
         # Load existing config for this source
         existing_cfg = load_source_config(CLIENT, src_name) or {}
-        saved_camp = existing_cfg.get("campaign_column", src_info["campaign_col"])
-        saved_spend = existing_cfg.get("spend_column", src_info["spend_col"])
-        saved_date = existing_cfg.get("date_column", src_info["date_col"])
-
         is_configured = bool(existing_cfg)
 
         # Show available columns as tags
         cols_list = " ".join(f'<span style="background:#f1f5f9; color:#334155; padding:0.15rem 0.5rem; border-radius:4px; font-size:0.75rem; font-family:monospace; margin:0.1rem;">{c}</span>' for c in all_cols)
+        if is_depvar_source:
+            type_badge = '<span style="background:#faf5ff; color:#7c3aed; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Dep Var Source</span>'
+        else:
+            type_badge = '<span style="background:#eff6ff; color:#1e40af; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Spend Source</span>'
         status_badge = '<span style="background:#dcfce7; color:#166534; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Configured</span>' if is_configured else '<span style="background:#fef3c7; color:#92400e; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Needs Config</span>'
 
         st.markdown(f"""
@@ -729,7 +730,10 @@ elif page == "Sources":
                     margin-bottom:0.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); position:relative; overflow:hidden;">
             <div style="position:absolute; top:0; left:0; right:0; height:4px; background:{color};"></div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
-                <span style="font-weight:700; color:#0f172a; font-size:0.95rem;">{src_name}</span>
+                <div style="display:flex; align-items:center; gap:0.75rem;">
+                    <span style="font-weight:700; color:#0f172a; font-size:0.95rem;">{src_name}</span>
+                    {type_badge}
+                </div>
                 {status_badge}
             </div>
             <div style="margin-bottom:0.5rem;">
@@ -739,26 +743,72 @@ elif page == "Sources":
         </div>
         """, unsafe_allow_html=True)
 
-        sc1, sc2, sc3, sc4 = st.columns([3, 3, 3, 1.5])
-        with sc1:
-            camp_idx = all_cols.index(saved_camp) if saved_camp in all_cols else 0
-            new_camp = st.selectbox("Campaign Name", all_cols, index=camp_idx, key=f"src_camp_{src_name}")
-        with sc2:
-            spend_idx = all_cols.index(saved_spend) if saved_spend in all_cols else 0
-            new_spend = st.selectbox("Spend / Value", all_cols, index=spend_idx, key=f"src_spend_{src_name}")
-        with sc3:
+        if is_depvar_source:
+            # Dependent variable source: map columns to dep var names
+            saved_date = existing_cfg.get("date_column", src_info["date_col"])
             date_idx = all_cols.index(saved_date) if saved_date in all_cols else 0
-            new_date = st.selectbox("Date", all_cols, index=date_idx, key=f"src_date_{src_name}")
-        with sc4:
-            st.markdown("")
+            default_dv_map = src_info.get("dep_var_cols", {})
+            saved_dv_map = existing_cfg.get("dep_var_columns", default_dv_map)
+
+            dc1, dc2 = st.columns([1, 3])
+            with dc1:
+                new_date = st.selectbox("Date Column", all_cols, index=date_idx, key=f"src_date_{src_name}")
+
+            st.markdown('<div style="font-size:0.8rem; font-weight:600; color:#7c3aed; margin-bottom:0.5rem;">Map columns to dependent variables:</div>', unsafe_allow_html=True)
+
+            dep_var_names = config.get("dependent_variables", [])
+            dv_col_assignments = {}
+            num_dv_cols = len(default_dv_map)
+            dv_columns = st.columns(max(num_dv_cols + 1, 2) + [1])  if False else None  # placeholder
+
+            # Show a row per potential dep var column
+            dv_source_cols = [c for c in all_cols if c != new_date]
+            for dv_idx, dv_col in enumerate(dv_source_cols[:6]):
+                dvc1, dvc2 = st.columns([1, 1])
+                default_target = saved_dv_map.get(dv_col, "")
+                options = ["-- skip --"] + dep_var_names
+                target_idx = options.index(default_target) if default_target in options else 0
+                with dvc1:
+                    st.markdown(f'<span style="font-family:monospace; font-size:0.85rem; color:#334155;">{dv_col}</span>', unsafe_allow_html=True)
+                with dvc2:
+                    picked = st.selectbox("Maps to", options, index=target_idx, key=f"dv_map_{src_name}_{dv_col}", label_visibility="collapsed")
+                if picked != "-- skip --":
+                    dv_col_assignments[dv_col] = picked
+
             if st.button("Save", key=f"src_save_{src_name}", use_container_width=True):
                 save_source_config(CLIENT, src_name, {
                     "display_name": src_name,
-                    "campaign_column": new_camp,
-                    "spend_column": new_spend,
+                    "source_type": "dependent_variable",
                     "date_column": new_date,
+                    "dep_var_columns": dv_col_assignments,
                 })
                 st.rerun()
+        else:
+            # Spend source: campaign, spend, date columns
+            saved_camp = existing_cfg.get("campaign_column", src_info["campaign_col"])
+            saved_spend = existing_cfg.get("spend_column", src_info["spend_col"])
+            saved_date = existing_cfg.get("date_column", src_info["date_col"])
+
+            sc1, sc2, sc3, sc4 = st.columns([3, 3, 3, 1.5])
+            with sc1:
+                camp_idx = all_cols.index(saved_camp) if saved_camp in all_cols else 0
+                new_camp = st.selectbox("Campaign Name", all_cols, index=camp_idx, key=f"src_camp_{src_name}")
+            with sc2:
+                spend_idx = all_cols.index(saved_spend) if saved_spend in all_cols else 0
+                new_spend = st.selectbox("Spend / Value", all_cols, index=spend_idx, key=f"src_spend_{src_name}")
+            with sc3:
+                date_idx = all_cols.index(saved_date) if saved_date in all_cols else 0
+                new_date = st.selectbox("Date", all_cols, index=date_idx, key=f"src_date_{src_name}")
+            with sc4:
+                st.markdown("")
+                if st.button("Save", key=f"src_save_{src_name}", use_container_width=True):
+                    save_source_config(CLIENT, src_name, {
+                        "display_name": src_name,
+                        "campaign_column": new_camp,
+                        "spend_column": new_spend,
+                        "date_column": new_date,
+                    })
+                    st.rerun()
 
         st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
 

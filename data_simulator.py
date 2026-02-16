@@ -302,6 +302,22 @@ SIMULATED_CSV_SOURCES = {
         "spend_col": "metric_value",
         "date_col": "report_date",
     },
+    "shopify_orders_daily": {
+        "columns": ["order_date", "new_customers", "returning_customers", "total_orders", "gross_revenue", "net_revenue", "refunds", "discount_usage"],
+        "campaign_col": None,
+        "spend_col": None,
+        "date_col": "order_date",
+        "dep_var_cols": {"new_customers": "acquisition", "returning_customers": "winbacks"},
+        "source_type": "dependent_variable",
+    },
+    "ga4_conversions_daily": {
+        "columns": ["date", "event_name", "event_count", "total_users", "new_users", "sessions", "bounce_rate", "avg_session_duration"],
+        "campaign_col": None,
+        "spend_col": None,
+        "date_col": "date",
+        "dep_var_cols": {"new_users": "acquisition"},
+        "source_type": "dependent_variable",
+    },
 }
 
 
