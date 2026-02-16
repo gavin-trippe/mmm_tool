@@ -773,9 +773,9 @@ elif page == "Sources":
             # Show a row per potential column
             dv_source_cols = [c for c in all_cols if c != new_date]
             if is_context_source:
-                col_options = ["-- skip --"] + ctx_var_names + dep_var_names
+                col_options = ["-- skip --"] + ctx_var_names
             else:
-                col_options = ["-- skip --"] + dep_var_names + ctx_var_names
+                col_options = ["-- skip --"] + dep_var_names
             for dv_idx, dv_col in enumerate(dv_source_cols[:6]):
                 dvc1, dvc2 = st.columns([1, 1])
                 default_target = saved_dv_map.get(dv_col, "")
