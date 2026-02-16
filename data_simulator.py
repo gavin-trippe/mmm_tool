@@ -45,6 +45,8 @@ DEFAULT_TACTICS = {
 
 DEFAULT_DEP_VARS = ["acquisition", "winbacks"]
 
+DEFAULT_CONTEXT_VARS = ["price", "promo_flag"]
+
 # =========================================================
 # Client folder management
 # =========================================================
@@ -74,6 +76,7 @@ def create_client(name):
         save_client_config(name, {
             "tactics": DEFAULT_TACTICS,
             "dependent_variables": DEFAULT_DEP_VARS,
+            "context_variables": DEFAULT_CONTEXT_VARS,
             "export_window_months": 27,
         })
     return client_dir
@@ -94,11 +97,13 @@ def load_client_config(client):
         # Ensure all keys exist with defaults
         config.setdefault("tactics", DEFAULT_TACTICS)
         config.setdefault("dependent_variables", DEFAULT_DEP_VARS)
+        config.setdefault("context_variables", DEFAULT_CONTEXT_VARS)
         config.setdefault("export_window_months", 27)
         return config
     return {
         "tactics": DEFAULT_TACTICS.copy(),
         "dependent_variables": DEFAULT_DEP_VARS.copy(),
+        "context_variables": DEFAULT_CONTEXT_VARS.copy(),
         "export_window_months": 27,
     }
 
@@ -262,6 +267,13 @@ RAW_CAMPAIGNS = {
             {"raw_name": "CRM_Daily_Winbacks", "mapped_to": "winbacks", "type": "dependent_variable"},
         ],
     },
+    "context": {
+        "source": "csv",
+        "campaigns": [
+            {"raw_name": "Avg_Product_Price_Daily", "mapped_to": "price", "type": "context_variable"},
+            {"raw_name": "Promo_Active_Flag", "mapped_to": "promo_flag", "type": "context_variable"},
+        ],
+    },
 }
 
 # Simulated CSV sources with extra columns (for column mapping demo)
@@ -325,6 +337,14 @@ def generate_raw_data(start_date="2024-11-01", n_days=120):
                 # Dep vars get higher base values
                 base = np.random.uniform(200, 500)
                 volatility = np.random.uniform(0.1, 0.2)
+            elif campaign.get("type") == "context_variable":
+                # Context vars: price ~65, promo flag ~0.3
+                if "price" in campaign["raw_name"].lower():
+                    base = np.random.uniform(60, 75)
+                    volatility = np.random.uniform(0.02, 0.05)
+                else:
+                    base = np.random.uniform(0.2, 0.4)
+                    volatility = np.random.uniform(0.3, 0.5)
             else:
                 base = np.random.uniform(200, 2000)
                 volatility = np.random.uniform(0.2, 0.6)
@@ -400,9 +420,11 @@ def build_clean_output(raw_df, saved_mappings, ignored_list, config):
     # Remove ignored campaigns
     df = df[~ignored_mask]
 
-    # Split into tactics and dep vars
+    # Split into tactics, dep vars, and context vars
     tactic_df = df[(df["mapped_to"].notna()) & (df["mapping_type"] == "tactic")].copy()
     depvar_df = df[(df["mapped_to"].notna()) & (df["mapping_type"] == "dependent_variable")].copy()
+    context_df = df[(df["mapped_to"].notna()) & (df["mapping_type"] == "context_variable")].copy()
+    context_vars = config.get("context_variables", [])
 
     # Pivot tactics
     if not tactic_df.empty:
@@ -422,8 +444,18 @@ def build_clean_output(raw_df, saved_mappings, ignored_list, config):
     else:
         depvar_pivot = pd.DataFrame({"date": df["date"].unique()})
 
+    # Pivot context vars
+    if not context_df.empty:
+        context_pivot = context_df.pivot_table(
+            index="date", columns="mapped_to", values="daily_value",
+            aggfunc="mean", fill_value=0.0
+        ).reset_index()
+    else:
+        context_pivot = pd.DataFrame({"date": df["date"].unique()})
+
     # Merge
     output = tactic_pivot.merge(depvar_pivot, on="date", how="outer").fillna(0.0)
+    output = output.merge(context_pivot, on="date", how="outer").fillna(0.0)
 
     # Ensure all standard columns exist
     for tactic in all_tactics:
@@ -432,6 +464,9 @@ def build_clean_output(raw_df, saved_mappings, ignored_list, config):
     for dv in dep_vars:
         if dv not in output.columns:
             output[dv] = 0.0
+    for cv in context_vars:
+        if cv not in output.columns:
+            output[cv] = 0.0
 
     # Apply date window
     if window_months:
@@ -440,10 +475,9 @@ def build_clean_output(raw_df, saved_mappings, ignored_list, config):
 
     # Add metadata columns
     output["exclude_this_date"] = "FALSE"
-    output["price"] = round(np.random.uniform(60, 75), 2)
 
     # Reorder columns
-    col_order = ["date"] + dep_vars + ["exclude_this_date"] + all_tactics + ["price"]
+    col_order = ["date"] + dep_vars + ["exclude_this_date"] + all_tactics + context_vars
     col_order = [c for c in col_order if c in output.columns]
     output = output[col_order].sort_values("date", ascending=False)
 
@@ -595,6 +629,8 @@ def setup_demo_client():
         "StackAdapt_Display_Retargeting": {"target": "stack_display", "type": "tactic"},
         "CRM_Daily_New_Members": {"target": "acquisition", "type": "dependent_variable"},
         "CRM_Daily_Winbacks": {"target": "winbacks", "type": "dependent_variable"},
+        "Avg_Product_Price_Daily": {"target": "price", "type": "context_variable"},
+        "Promo_Active_Flag": {"target": "promo_flag", "type": "context_variable"},
     }
     save_mappings(client, mappings)
 

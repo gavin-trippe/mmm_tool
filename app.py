@@ -40,6 +40,7 @@ from data_simulator import (
     SIMULATED_CSV_SOURCES,
     DEFAULT_TACTICS,
     DEFAULT_DEP_VARS,
+    DEFAULT_CONTEXT_VARS,
     generate_geo_data,
     aggregate_geo_for_geolift,
     get_unmatched_zips,
@@ -711,7 +712,9 @@ elif page == "Sources":
     for idx, (src_name, src_info) in enumerate(SIMULATED_CSV_SOURCES.items()):
         color = sim_colors[idx % len(sim_colors)]
         all_cols = src_info["columns"]
-        is_depvar_source = src_info.get("source_type") == "dependent_variable"
+        src_type = src_info.get("source_type", "spend")
+        is_depvar_source = src_type == "dependent_variable"
+        is_context_source = src_type == "context_variable"
 
         # Load existing config for this source
         existing_cfg = load_source_config(CLIENT, src_name) or {}
@@ -721,6 +724,8 @@ elif page == "Sources":
         cols_list = " ".join(f'<span style="background:#f1f5f9; color:#334155; padding:0.15rem 0.5rem; border-radius:4px; font-size:0.75rem; font-family:monospace; margin:0.1rem;">{c}</span>' for c in all_cols)
         if is_depvar_source:
             type_badge = '<span style="background:#faf5ff; color:#7c3aed; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Dep Var Source</span>'
+        elif is_context_source:
+            type_badge = '<span style="background:#fef3c7; color:#92400e; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Context Var Source</span>'
         else:
             type_badge = '<span style="background:#eff6ff; color:#1e40af; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Spend Source</span>'
         status_badge = '<span style="background:#dcfce7; color:#166534; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Configured</span>' if is_configured else '<span style="background:#fef3c7; color:#92400e; padding:0.15rem 0.6rem; border-radius:50px; font-size:0.7rem; font-weight:600;">Needs Config</span>'
@@ -754,9 +759,10 @@ elif page == "Sources":
             with dc1:
                 new_date = st.selectbox("Date Column", all_cols, index=date_idx, key=f"src_date_{src_name}")
 
-            st.markdown('<div style="font-size:0.8rem; font-weight:600; color:#7c3aed; margin-bottom:0.5rem;">Map columns to dependent variables:</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.8rem; font-weight:600; color:#7c3aed; margin-bottom:0.5rem;">Map columns to dependent variables or context variables:</div>', unsafe_allow_html=True)
 
             dep_var_names = config.get("dependent_variables", [])
+            ctx_var_names = config.get("context_variables", [])
             dv_col_assignments = {}
             num_dv_cols = len(default_dv_map)
             dv_columns = st.columns(max(num_dv_cols + 1, 2) + [1])  if False else None  # placeholder
@@ -766,7 +772,7 @@ elif page == "Sources":
             for dv_idx, dv_col in enumerate(dv_source_cols[:6]):
                 dvc1, dvc2 = st.columns([1, 1])
                 default_target = saved_dv_map.get(dv_col, "")
-                options = ["-- skip --"] + dep_var_names
+                options = ["-- skip --"] + dep_var_names + ctx_var_names
                 target_idx = options.index(default_target) if default_target in options else 0
                 with dvc1:
                     st.markdown(f'<span style="font-family:monospace; font-size:0.85rem; color:#334155;">{dv_col}</span>', unsafe_allow_html=True)
@@ -891,20 +897,23 @@ elif page == "Campaign Mapping":
 
             col1, col2, col3, col4 = st.columns([1.5, 3, 1.5, 1])
             with col1:
-                map_type = st.selectbox("Type", ["Spend Tactic", "Dependent Variable"],
+                map_type = st.selectbox("Type", ["Spend Tactic", "Dependent Variable", "Context Variable"],
                                         key=f"type_{i}", label_visibility="collapsed")
             with col2:
                 if map_type == "Spend Tactic":
                     channel_tactics = config["tactics"].get(camp["channel"], [])
                     options = channel_tactics + [t for t in all_tactics if t not in channel_tactics]
-                else:
+                elif map_type == "Dependent Variable":
                     options = dep_vars
+                else:
+                    options = config.get("context_variables", [])
                 selected = st.selectbox("Target", ["-- Select --"] + options,
                                         key=f"map_{i}", label_visibility="collapsed")
             with col3:
                 if st.button("Save", key=f"btn_save_{i}", use_container_width=True):
                     if selected != "-- Select --":
-                        m_type = "tactic" if map_type == "Spend Tactic" else "dependent_variable"
+                        type_lookup = {"Spend Tactic": "tactic", "Dependent Variable": "dependent_variable", "Context Variable": "context_variable"}
+                        m_type = type_lookup[map_type]
                         saved_mappings[camp["raw_campaign_name"]] = {"target": selected, "type": m_type}
                         save_mappings(CLIENT, saved_mappings)
                         st.session_state.mappings = saved_mappings
@@ -1008,11 +1017,13 @@ elif page == "Clean Export":
 
     all_tactics = get_all_tactics(config)
     dep_vars = config.get("dependent_variables", [])
+    ctx_vars = config.get("context_variables", [])
     window = config.get("export_window_months", 27)
     unmapped = get_unmapped_campaigns(raw_df, saved_mappings, ignored_list)
     clean_df, excluded_spend = build_clean_output(raw_df, saved_mappings, ignored_list, config)
     tactic_cols = [c for c in clean_df.columns if c in all_tactics]
     depvar_cols = [c for c in clean_df.columns if c in dep_vars]
+    ctxvar_cols = [c for c in clean_df.columns if c in ctx_vars]
     total_spend = clean_df[tactic_cols].sum().sum() if tactic_cols else 0
 
     # Hero
@@ -1034,7 +1045,7 @@ elif page == "Clean Export":
         "Clean Export Page",
         "Generates the final MMM-ready CSV output: daily rows x standardized tactic columns. "
         "Applies the export window filter (e.g., last 27 months), aggregates mapped campaigns into tactic columns, "
-        "adds dependent variable columns, excludes ignored campaigns, and saves timestamped snapshots for auditing.",
+        "adds dependent variable columns, adds context variable columns (aggregated by mean), excludes ignored campaigns, and saves timestamped snapshots for auditing.",
         functions=[
             "build_clean_output(raw_df, saved_mappings, ignored_list, config) -- aggregates raw data into clean daily format, returns (clean_df, excluded_spend)",
             "save_export_snapshot(client, clean_df) -- saves timestamped CSV snapshot to client's exports/ folder",
@@ -1094,17 +1105,21 @@ elif page == "Clean Export":
 
     # Column summary strip
     st.markdown(f"""
-    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:0; margin-bottom:1.5rem;
+    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0; margin-bottom:1.5rem;
                 border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; background:#fff;">
         <div style="padding:0.85rem 1.25rem; text-align:center;">
             <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Tactic Columns</div>
             <div style="font-size:1.1rem; font-weight:800; color:#0f172a;">{len(tactic_cols)}</div>
         </div>
-        <div style="padding:0.85rem 1.25rem; text-align:center; border-left:1px solid #f1f5f9; border-right:1px solid #f1f5f9;">
+        <div style="padding:0.85rem 1.25rem; text-align:center; border-left:1px solid #f1f5f9;">
             <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Dep Var Columns</div>
             <div style="font-size:1.1rem; font-weight:800; color:#0f172a;">{len(depvar_cols)}</div>
         </div>
-        <div style="padding:0.85rem 1.25rem; text-align:center;">
+        <div style="padding:0.85rem 1.25rem; text-align:center; border-left:1px solid #f1f5f9;">
+            <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Context Var Columns</div>
+            <div style="font-size:1.1rem; font-weight:800; color:#0f172a;">{len(ctxvar_cols)}</div>
+        </div>
+        <div style="padding:0.85rem 1.25rem; text-align:center; border-left:1px solid #f1f5f9;">
             <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Total Columns</div>
             <div style="font-size:1.1rem; font-weight:800; color:#0f172a;">{len(clean_df.columns)}</div>
         </div>
@@ -1454,7 +1469,7 @@ elif page == "Settings":
     dev_info(
         "Settings Page",
         "Client-level configuration: manage standardized tactic names (organized by channel group), "
-        "dependent variable names, and the export window (rolling months). All settings persisted to config.json.",
+        "dependent variable names, context variable names (e.g., price, promo_flag), and the export window (rolling months). All settings persisted to config.json.",
         functions=[
             "load_client_config(client) -- loads config.json with tactics, dep vars, window, etc.",
             "save_client_config(client, config) -- saves config.json",
@@ -1575,12 +1590,53 @@ elif page == "Settings":
         st.session_state.config = config
         st.rerun()
 
+    st.markdown('<div style="height:1.5rem;"></div>', unsafe_allow_html=True)
+
+    # -- Context Variable Management --
+    st.markdown("""
+    <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+        Context Variables
+    </div>
+    <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
+        Variables like price, promo flags, or other non-spend/non-outcome data included in the MMM export (aggregated by mean)
+    </div>
+    """, unsafe_allow_html=True)
+
+    ctx_vars = config.get("context_variables", list(DEFAULT_CONTEXT_VARS))
+    cv_changed = False
+
+    for cv in ctx_vars:
+        cv1, cv2 = st.columns([5, 1])
+        with cv1:
+            st.markdown(f'<span style="display:inline-block; background:#fef3c7; color:#92400e; padding:0.3rem 0.75rem; border-radius:6px; font-size:0.85rem; font-weight:500; font-family:monospace;">{cv}</span>', unsafe_allow_html=True)
+        with cv2:
+            if st.button("x", key=f"rm_cv_{cv}"):
+                ctx_vars.remove(cv)
+                cv_changed = True
+
+    cv1, cv2 = st.columns([4, 1])
+    with cv1:
+        new_cv = st.text_input("New context variable name", key="new_cv_name")
+    with cv2:
+        st.markdown("")
+        if st.button("Add", key="btn_add_cv"):
+            if new_cv and new_cv.strip() and new_cv.strip() not in ctx_vars:
+                ctx_vars.append(new_cv.strip())
+                cv_changed = True
+
+    if cv_changed:
+        config["context_variables"] = ctx_vars
+        save_client_config(CLIENT, config)
+        st.session_state.config = config
+        st.rerun()
+
     st.markdown('<div style="height:2rem;"></div>', unsafe_allow_html=True)
 
     # Reset
     if st.button("Reset to Defaults", key="btn_reset"):
         config["tactics"] = {k: list(v) for k, v in DEFAULT_TACTICS.items()}
         config["dependent_variables"] = list(DEFAULT_DEP_VARS)
+        config["context_variables"] = list(DEFAULT_CONTEXT_VARS)
         config["export_window_months"] = 27
         save_client_config(CLIENT, config)
         st.session_state.config = config
@@ -1861,17 +1917,21 @@ elif page == "Onboarding":
         # Mapping controls at top
         mc1, mc2, mc3, mc4 = st.columns([2, 3, 2, 1])
         with mc1:
-            bulk_type = st.selectbox("Mapping Type", ["Spend Tactic", "Dependent Variable"], key="ob_bulk_type")
+            bulk_type = st.selectbox("Mapping Type", ["Spend Tactic", "Dependent Variable", "Context Variable"], key="ob_bulk_type")
         with mc2:
             if bulk_type == "Spend Tactic":
                 bulk_target = st.selectbox("Target", ["-- Select --"] + all_tactics, key="ob_bulk_target")
-            else:
+            elif bulk_type == "Dependent Variable":
                 bulk_target = st.selectbox("Target", ["-- Select --"] + dep_vars, key="ob_bulk_target_dv")
+            else:
+                ctx_vars = config.get("context_variables", [])
+                bulk_target = st.selectbox("Target", ["-- Select --"] + ctx_vars, key="ob_bulk_target_cv")
         with mc3:
             if st.button("Apply to Selected", key="ob_apply", use_container_width=True):
                 if bulk_target != "-- Select --":
                     selected_keys = [k for k, v in st.session_state.items() if k.startswith("ob_chk_") and v]
-                    m_type = "tactic" if bulk_type == "Spend Tactic" else "dependent_variable"
+                    type_lookup_ob = {"Spend Tactic": "tactic", "Dependent Variable": "dependent_variable", "Context Variable": "context_variable"}
+                    m_type = type_lookup_ob[bulk_type]
                     for k in selected_keys:
                         camp_name = k.replace("ob_chk_", "")
                         saved_mappings[camp_name] = {"target": bulk_target, "type": m_type}
@@ -1937,11 +1997,13 @@ elif page == "Client Dashboard":
 
     all_tactics = get_all_tactics(config)
     dep_vars = config.get("dependent_variables", [])
+    ctx_vars = config.get("context_variables", [])
     window = config.get("export_window_months", 27)
     unmapped = get_unmapped_campaigns(raw_df, saved_mappings, ignored_list)
     clean_df, excluded_spend = build_clean_output(raw_df, saved_mappings, ignored_list, config)
     tactic_cols = [c for c in clean_df.columns if c in all_tactics]
     depvar_cols = [c for c in clean_df.columns if c in dep_vars]
+    ctxvar_cols = [c for c in clean_df.columns if c in ctx_vars]
     total_spend = clean_df[tactic_cols].sum().sum() if tactic_cols else 0
     total_campaigns = sum(len(ch["campaigns"]) for ch in RAW_CAMPAIGNS.values())
     mapped_count = len(saved_mappings)
@@ -2020,7 +2082,7 @@ elif page == "Client Dashboard":
             <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.1em;
                         color:#94a3b8; margin-bottom:0.5rem;">Campaigns Mapped</div>
             <div style="font-size:2rem; font-weight:800; color:#0f172a; letter-spacing:-0.03em;">{mapped_count}<span style="font-size:1rem; color:#94a3b8; font-weight:500;">/{total_campaigns}</span></div>
-            <div style="font-size:0.8rem; color:#64748b; margin-top:0.25rem;">{len(tactic_cols)} tactics + {len(depvar_cols)} dep vars</div>
+            <div style="font-size:0.8rem; color:#64748b; margin-top:0.25rem;">{len(tactic_cols)} tactics + {len(depvar_cols)} dep vars + {len(ctxvar_cols)} context</div>
         </div>
         <div style="background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:1.5rem;
                     box-shadow:0 1px 3px rgba(0,0,0,0.04); position:relative; overflow:hidden;">
