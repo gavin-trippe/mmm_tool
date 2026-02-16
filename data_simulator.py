@@ -309,10 +309,12 @@ SIMULATED_CSV_SOURCES = {
         "date_col": "Date",
     },
     "crm_daily_extract": {
-        "columns": ["report_date", "metric_name", "metric_value", "segment", "source_system", "updated_at"],
-        "campaign_col": "metric_name",
-        "spend_col": "metric_value",
+        "columns": ["report_date", "avg_product_price", "promo_active_flag", "avg_order_value", "discount_pct", "segment", "updated_at"],
+        "campaign_col": None,
+        "spend_col": None,
         "date_col": "report_date",
+        "dep_var_cols": {"avg_product_price": "price", "promo_active_flag": "promo_flag"},
+        "source_type": "context_variable",
     },
     "shopify_orders_daily": {
         "columns": ["order_date", "new_customers", "returning_customers", "total_orders", "gross_revenue", "net_revenue", "refunds", "discount_usage"],

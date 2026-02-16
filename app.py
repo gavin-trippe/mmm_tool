@@ -748,8 +748,8 @@ elif page == "Sources":
         </div>
         """, unsafe_allow_html=True)
 
-        if is_depvar_source:
-            # Dependent variable source: map columns to dep var names
+        if is_depvar_source or is_context_source:
+            # Dep var or context var source: map columns to variable names
             saved_date = existing_cfg.get("date_column", src_info["date_col"])
             date_idx = all_cols.index(saved_date) if saved_date in all_cols else 0
             default_dv_map = src_info.get("dep_var_cols", {})
@@ -759,7 +759,10 @@ elif page == "Sources":
             with dc1:
                 new_date = st.selectbox("Date Column", all_cols, index=date_idx, key=f"src_date_{src_name}")
 
-            st.markdown('<div style="font-size:0.8rem; font-weight:600; color:#7c3aed; margin-bottom:0.5rem;">Map columns to dependent variables or context variables:</div>', unsafe_allow_html=True)
+            if is_context_source:
+                st.markdown('<div style="font-size:0.8rem; font-weight:600; color:#92400e; margin-bottom:0.5rem;">Map columns to context variables:</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div style="font-size:0.8rem; font-weight:600; color:#7c3aed; margin-bottom:0.5rem;">Map columns to dependent variables:</div>', unsafe_allow_html=True)
 
             dep_var_names = config.get("dependent_variables", [])
             ctx_var_names = config.get("context_variables", [])
@@ -767,24 +770,27 @@ elif page == "Sources":
             num_dv_cols = len(default_dv_map)
             dv_columns = st.columns(max(num_dv_cols + 1, 2) + [1])  if False else None  # placeholder
 
-            # Show a row per potential dep var column
+            # Show a row per potential column
             dv_source_cols = [c for c in all_cols if c != new_date]
+            if is_context_source:
+                col_options = ["-- skip --"] + ctx_var_names + dep_var_names
+            else:
+                col_options = ["-- skip --"] + dep_var_names + ctx_var_names
             for dv_idx, dv_col in enumerate(dv_source_cols[:6]):
                 dvc1, dvc2 = st.columns([1, 1])
                 default_target = saved_dv_map.get(dv_col, "")
-                options = ["-- skip --"] + dep_var_names + ctx_var_names
-                target_idx = options.index(default_target) if default_target in options else 0
+                target_idx = col_options.index(default_target) if default_target in col_options else 0
                 with dvc1:
                     st.markdown(f'<span style="font-family:monospace; font-size:0.85rem; color:#334155;">{dv_col}</span>', unsafe_allow_html=True)
                 with dvc2:
-                    picked = st.selectbox("Maps to", options, index=target_idx, key=f"dv_map_{src_name}_{dv_col}", label_visibility="collapsed")
+                    picked = st.selectbox("Maps to", col_options, index=target_idx, key=f"dv_map_{src_name}_{dv_col}", label_visibility="collapsed")
                 if picked != "-- skip --":
                     dv_col_assignments[dv_col] = picked
 
             if st.button("Save", key=f"src_save_{src_name}", use_container_width=True):
                 save_source_config(CLIENT, src_name, {
                     "display_name": src_name,
-                    "source_type": "dependent_variable",
+                    "source_type": src_type,
                     "date_column": new_date,
                     "dep_var_columns": dv_col_assignments,
                 })
