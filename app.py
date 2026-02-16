@@ -1254,6 +1254,7 @@ elif page == "Data Audit":
 
     snapshots = list_export_snapshots(CLIENT)
     dep_vars = config.get("dependent_variables", [])
+    ctx_vars = config.get("context_variables", [])
 
     # Hero
     st.markdown("""
@@ -1300,13 +1301,18 @@ elif page == "Data Audit":
         missing_dates = check_date_continuity(clean_df)
         dv_issues = check_dependent_variables(clean_df, dep_vars)
 
+        # Check context var presence
+        ctx_in_export = [c for c in ctx_vars if c in clean_df.columns]
+        ctx_missing = [c for c in ctx_vars if c not in clean_df.columns]
+
         # Health status strip
         checks = [
             ("Date Continuity", "0 gaps" if not missing_dates else f"{len(missing_dates)} gaps", not missing_dates),
             ("Dep Var Health", "All healthy" if not dv_issues else f"{len(dv_issues)} issues", not dv_issues),
+            ("Context Vars", f"{len(ctx_in_export)}/{len(ctx_vars)} present" if ctx_vars else "None configured", not ctx_missing),
             ("Snapshots", f"{len(snapshots)} saved", True),
         ]
-        strip_html = '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:0; margin-bottom:2rem; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; background:#fff;">'
+        strip_html = '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0; margin-bottom:2rem; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; background:#fff;">'
         for idx, (lbl, val, ok) in enumerate(checks):
             dot = "#10b981" if ok else "#ef4444"
             bl = "" if idx == 0 else "border-left:1px solid #f1f5f9;"
@@ -1365,6 +1371,42 @@ elif page == "Data Audit":
             <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px;
                         padding:1.25rem; text-align:center;">
                 <span style="font-weight:700; color:#065f46;">&#10003; All dependent variables have values every day</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown('<div style="height:1.5rem;"></div>', unsafe_allow_html=True)
+
+        # -- Context Variable Health --
+        st.markdown("""
+        <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:1rem;">
+            Context Variable Health
+        </div>
+        """, unsafe_allow_html=True)
+        if ctx_missing:
+            st.markdown(f"""
+            <div style="background:#fef2f2; border:1px solid #fca5a5; border-left:4px solid #ef4444;
+                        border-radius:12px; padding:1rem 1.25rem; margin-bottom:1rem;">
+                <span style="font-weight:700; color:#991b1b;">{len(ctx_missing)} context variable(s) missing from export:</span>
+                <span style="color:#991b1b;"> {', '.join(ctx_missing)}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        elif not ctx_vars:
+            st.markdown("""
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px;
+                        padding:1.25rem; text-align:center;">
+                <span style="font-weight:600; color:#64748b;">No context variables configured</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            cv_summary = ""
+            for cv in ctx_in_export:
+                cv_mean = clean_df[cv].mean()
+                cv_summary += f'<span style="background:#fef3c7; color:#92400e; padding:0.2rem 0.6rem; border-radius:6px; font-size:0.8rem; font-weight:500; font-family:monospace; margin:0.15rem;">{cv} (avg: {cv_mean:.2f})</span> '
+            st.markdown(f"""
+            <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px;
+                        padding:1.25rem;">
+                <div style="font-weight:700; color:#065f46; margin-bottom:0.5rem;">&#10003; All {len(ctx_in_export)} context variable(s) present in export</div>
+                <div>{cv_summary}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1742,7 +1784,7 @@ elif page == "Data Freshness":
     # Tactic-level freshness
     st.markdown("""
     <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
-        Tactic &amp; Dep Var Freshness
+        Tactic, Dep Var &amp; Context Var Freshness
     </div>
     <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
         Last date with non-zero data for each MMM column -- if not current, the export will have zeros at the end
@@ -1772,8 +1814,12 @@ elif page == "Data Freshness":
             dot = "#ef4444"; row_bg = "background:#fef2f2;"; stale_txt = f"{f['days_stale']} (!)"
         else:
             dot = "#94a3b8"; row_bg = "background:#f8fafc;"; stale_txt = "--"
-        type_badge_bg = "#eff6ff" if f["type"] == "tactic" else "#faf5ff"
-        type_badge_color = "#1e40af" if f["type"] == "tactic" else "#7c3aed"
+        if f["type"] == "context_variable":
+            type_badge_bg = "#fef3c7"; type_badge_color = "#92400e"
+        elif f["type"] == "dependent_variable":
+            type_badge_bg = "#faf5ff"; type_badge_color = "#7c3aed"
+        else:
+            type_badge_bg = "#eff6ff"; type_badge_color = "#1e40af"
         tbl += f"""<tr style="{row_bg} border-bottom:1px solid #f1f5f9;">
             <td style="padding:0.75rem 1.25rem;"><div style="width:10px; height:10px; border-radius:50%; background:{dot};"></div></td>
             <td style="padding:0.75rem 1.25rem; font-weight:600; color:#0f172a;">{f['name']}</td>
@@ -2112,13 +2158,15 @@ elif page == "Client Dashboard":
     """, unsafe_allow_html=True)
 
     # ---- Data quality strip ----
+    ctx_in_export = [c for c in ctx_vars if c in clean_df.columns]
     dq_items = []
     dq_items.append(("Date Continuity", "0 gaps" if not missing_dates else f"{len(missing_dates)} gaps", not missing_dates))
     dq_items.append(("Dep Var Health", "All healthy" if not dv_issues else f"{len(dv_issues)} issues", not dv_issues))
+    dq_items.append(("Context Vars", f"{len(ctx_in_export)}/{len(ctx_vars)} in export" if ctx_vars else "N/A", len(ctx_in_export) == len(ctx_vars)))
     dq_items.append(("Campaign Coverage", "100%" if not unmapped else f"{mapped_count}/{total_campaigns}", not unmapped))
     dq_items.append(("Excluded Data", f"{len(ignored_list)} intentional" if ignored_list else "None", True))
 
-    dq_html = '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0; margin-bottom:2rem; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; background:#fff;">'
+    dq_html = '<div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:0; margin-bottom:2rem; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; background:#fff;">'
     for idx, (dq_label, dq_value, dq_ok) in enumerate(dq_items):
         dot_color = "#10b981" if dq_ok else "#ef4444"
         border_left = "" if idx == 0 else "border-left:1px solid #f1f5f9;"
@@ -2300,6 +2348,48 @@ elif page == "Client Dashboard":
 
         st.markdown('<div style="height:2rem;"></div>', unsafe_allow_html=True)
 
+    # ---- Context Variables summary ----
+    if ctxvar_cols:
+        st.markdown("""
+        <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+            Context Variables
+        </div>
+        <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1rem;">
+            Non-spend, non-outcome variables included in the MMM (aggregated by mean)
+        </div>
+        """, unsafe_allow_html=True)
+
+        cv_cards_html = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:1rem;">'
+        cv_colors = ["#f59e0b", "#d97706", "#b45309", "#92400e"]
+        for i, cv in enumerate(ctxvar_cols):
+            cv_mean = clean_df[cv].mean()
+            cv_min = clean_df[cv].min()
+            cv_max = clean_df[cv].max()
+            color = cv_colors[i % len(cv_colors)]
+            cv_cards_html += f"""
+            <div style="background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:1.5rem;
+                        box-shadow:0 1px 3px rgba(0,0,0,0.04); position:relative; overflow:hidden;">
+                <div style="position:absolute; top:0; left:0; right:0; height:4px; background:{color};"></div>
+                <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.1em;
+                            color:#94a3b8; margin-bottom:0.75rem;">{cv}</div>
+                <div style="font-size:1.8rem; font-weight:800; color:#0f172a; letter-spacing:-0.03em;">{cv_mean:,.2f}</div>
+                <div style="font-size:0.65rem; color:#94a3b8; margin-top:0.25rem;">Daily Average</div>
+                <div style="display:flex; gap:1.5rem; margin-top:0.75rem;">
+                    <div>
+                        <div style="font-size:0.65rem; color:#94a3b8; text-transform:uppercase;">Min</div>
+                        <div style="font-size:0.9rem; font-weight:600; color:#334155;">{cv_min:,.2f}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.65rem; color:#94a3b8; text-transform:uppercase;">Max</div>
+                        <div style="font-size:0.9rem; font-weight:600; color:#334155;">{cv_max:,.2f}</div>
+                    </div>
+                </div>
+            </div>"""
+        cv_cards_html += "</div>"
+        st.markdown(cv_cards_html, unsafe_allow_html=True)
+
+        st.markdown('<div style="height:2rem;"></div>', unsafe_allow_html=True)
+
     # ---- Dependent Variable Spike Analysis ----
     if depvar_cols:
         st.markdown("""
@@ -2383,8 +2473,8 @@ elif page == "Client Dashboard":
         filter_channel = st.multiselect("Filter by Channel", channels_available, default=channels_available, key="client_map_channel")
     with filt_c2:
         targets_available = sorted([t for t in mapped_display["Maps To"].unique().tolist() if t != "--"])
-        filter_target = st.multiselect("Filter by Tactic / Dep Var", targets_available, default=[], key="client_map_target",
-                                       placeholder="All tactics")
+        filter_target = st.multiselect("Filter by Tactic / Dep Var / Context Var", targets_available, default=[], key="client_map_target",
+                                       placeholder="All targets")
     with filt_c3:
         filter_search = st.text_input("Search", key="client_map_search", placeholder="Campaign name...")
 

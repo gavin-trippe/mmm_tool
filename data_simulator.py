@@ -673,6 +673,7 @@ def check_data_freshness(raw_df, saved_mappings, ignored_list, config):
     """
     all_tactics = get_all_tactics(config)
     dep_vars = config.get("dependent_variables", [])
+    ctx_vars = config.get("context_variables", [])
     today = datetime.now().strftime("%Y-%m-%d")
 
     # Build lookup: target -> list of raw campaign names that map to it
@@ -700,9 +701,14 @@ def check_data_freshness(raw_df, saved_mappings, ignored_list, config):
                 target_to_campaigns.setdefault(mapped, []).append(name)
 
     results = []
-    for target_name in list(set(all_tactics + dep_vars)):
+    for target_name in list(set(all_tactics + dep_vars + ctx_vars)):
         campaigns = target_to_campaigns.get(target_name, [])
-        t_type = "dependent_variable" if target_name in dep_vars else "tactic"
+        if target_name in ctx_vars:
+            t_type = "context_variable"
+        elif target_name in dep_vars:
+            t_type = "dependent_variable"
+        else:
+            t_type = "tactic"
 
         if not campaigns:
             results.append({
