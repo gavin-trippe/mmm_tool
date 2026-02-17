@@ -2425,6 +2425,42 @@ elif page == "Client Dashboard":
 
         st.markdown('<div style="height:1rem;"></div>', unsafe_allow_html=True)
 
+    # ---- Context Variable Trends ----
+    if ctxvar_cols:
+        st.markdown("""
+        <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+            Context Variable Trends
+        </div>
+        <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
+            Daily time series for non-spend, non-outcome variables (aggregated by mean)
+        </div>
+        """, unsafe_allow_html=True)
+
+        cv_chart_src = clean_df[["date"] + ctxvar_cols].copy()
+        cv_chart_src["date"] = pd.to_datetime(cv_chart_src["date"])
+        cv_chart_src = cv_chart_src.sort_values("date")
+
+        for cv in ctxvar_cols:
+            cv_series = cv_chart_src[["date", cv]].copy()
+            cv_avg = cv_series[cv].mean()
+            cv_min_val = cv_series[cv].min()
+            cv_max_val = cv_series[cv].max()
+
+            st.markdown(f"""
+            <div style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid #f59e0b;
+                        border-radius:12px; padding:1rem 1.25rem; margin-bottom:0.5rem;
+                        box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:700; color:#0f172a;">{cv.replace('_', ' ').title()}</span>
+                    <span style="font-size:0.8rem; color:#94a3b8;">Avg: <span style="color:#f59e0b; font-weight:700;">{cv_avg:,.2f}</span> &nbsp; Min: {cv_min_val:,.2f} &nbsp; Max: {cv_max_val:,.2f}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.line_chart(cv_series.set_index("date"), height=250, use_container_width=True)
+            st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+
+        st.markdown('<div style="height:1rem;"></div>', unsafe_allow_html=True)
+
     # ---- Campaign mapping table ----
     st.markdown("""
     <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
