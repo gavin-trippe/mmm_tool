@@ -2634,6 +2634,136 @@ elif page == "Geo Lift Export":
                    "Source: acquisition = Shopify order conversion flag (1 = new customer acquisition, 0 = no acquisition)."
     )
 
+    # -- ZIP File Upload Tool --
+    st.markdown("""
+    <div style="font-size:1.1rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em; margin-bottom:0.25rem;">
+        Upload ZIP Code File
+    </div>
+    <div style="font-size:0.85rem; color:#94a3b8; margin-bottom:1.25rem;">
+        Upload a CSV with ZIP code data and download a DMA-matched output ready for GeoLift
+    </div>
+    """, unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader(
+        "Upload CSV file (must contain a ZIP code column)",
+        type=["csv"],
+        key="geo_upload",
+    )
+
+    if uploaded_file is not None:
+        try:
+            upload_df = pd.read_csv(uploaded_file, dtype=str)
+        except Exception as e:
+            st.error(f"Could not read file: {e}")
+            upload_df = None
+
+        if upload_df is not None and len(upload_df) > 0:
+            # Let user pick which column is the ZIP
+            up1, up2 = st.columns([2, 2])
+            with up1:
+                zip_col = st.selectbox("Which column contains ZIP codes?", upload_df.columns.tolist(), key="upload_zip_col")
+            with up2:
+                value_col_options = ["-- row count (1 per row) --"] + [c for c in upload_df.columns if c != zip_col]
+                value_col = st.selectbox("Which column is the Y value (optional)?", value_col_options, key="upload_val_col")
+
+            # Normalize ZIPs and look up DMA
+            upload_df["_zip5"] = upload_df[zip_col].apply(normalize_zip)
+            dma_states = []
+            dma_codes = []
+            dma_names = []
+            for z in upload_df["_zip5"]:
+                result = zip_to_dma(z)
+                if result:
+                    dma_states.append(result[0])
+                    dma_codes.append(result[1])
+                    dma_names.append(result[2])
+                else:
+                    dma_states.append(None)
+                    dma_codes.append(None)
+                    dma_names.append(None)
+
+            upload_df["zip5"] = upload_df["_zip5"]
+            upload_df["state"] = dma_states
+            upload_df["dma_code"] = dma_codes
+            upload_df["dma_name"] = dma_names
+            upload_df = upload_df.drop(columns=["_zip5"])
+
+            matched = upload_df["dma_name"].notna().sum()
+            unmatched = upload_df["dma_name"].isna().sum()
+            match_pct = matched / len(upload_df) * 100 if len(upload_df) > 0 else 0
+
+            # Stats
+            m_color = "#10b981" if match_pct >= 95 else ("#f59e0b" if match_pct >= 80 else "#ef4444")
+            st.markdown(f"""
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:1rem; margin:1rem 0;">
+                <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                    <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Total Rows</div>
+                    <div style="font-size:1.6rem; font-weight:800; color:#0f172a;">{len(upload_df):,}</div>
+                </div>
+                <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                    <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Matched to DMA</div>
+                    <div style="font-size:1.6rem; font-weight:800; color:{m_color};">{matched:,}</div>
+                </div>
+                <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                    <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Unmatched</div>
+                    <div style="font-size:1.6rem; font-weight:800; color:{'#ef4444' if unmatched > 0 else '#10b981'};">{unmatched:,}</div>
+                </div>
+                <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                    <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8;">Match Rate</div>
+                    <div style="font-size:1.6rem; font-weight:800; color:{m_color};">{match_pct:.1f}%</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Preview
+            st.dataframe(upload_df.head(50), use_container_width=True, height=280)
+
+            # Build GeoLift-format output (grouped by dma_name + date if date col exists)
+            matched_df = upload_df[upload_df["dma_name"].notna()].copy()
+
+            if value_col == "-- row count (1 per row) --":
+                matched_df["Y"] = 1
+            else:
+                matched_df["Y"] = pd.to_numeric(matched_df[value_col], errors="coerce").fillna(0)
+
+            dl1, dl2 = st.columns(2)
+            with dl1:
+                full_csv = upload_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Full Matched CSV (all rows + DMA columns)",
+                    data=full_csv,
+                    file_name="zip_dma_matched.csv",
+                    mime="text/csv",
+                    key="dl_upload_full",
+                    use_container_width=True,
+                )
+            with dl2:
+                geolift_out = matched_df[["dma_name", "Y"]].groupby("dma_name", as_index=False)["Y"].sum()
+                geolift_out = geolift_out.rename(columns={"dma_name": "location"})
+                geolift_out = geolift_out[geolift_out["Y"] > 0].sort_values("location")
+                geolift_csv = geolift_out.to_csv(index=False)
+                st.download_button(
+                    label="Download GeoLift Format (location, Y)",
+                    data=geolift_csv,
+                    file_name="zip_to_dma_geolift.csv",
+                    mime="text/csv",
+                    key="dl_upload_geolift",
+                    use_container_width=True,
+                )
+
+            if unmatched > 0:
+                unmatched_zips_df = upload_df[upload_df["dma_name"].isna()][[zip_col, "zip5"]].drop_duplicates()
+                st.markdown(f"""
+                <div style="background:#fef2f2; border:1px solid #fca5a5; border-left:4px solid #ef4444;
+                            border-radius:10px; padding:0.85rem 1.25rem; margin-top:0.75rem;">
+                    <span style="font-weight:700; color:#991b1b;">{unmatched:,} row(s) had no DMA match</span>
+                    <span style="color:#991b1b; font-size:0.85rem;"> -- excluded from GeoLift output. Use the Add ZIP Mapping section below to resolve.</span>
+                </div>
+                """, unsafe_allow_html=True)
+                st.dataframe(unmatched_zips_df, use_container_width=True, height=180)
+
+    section_divider()
+
     # KPI row
     total_orders = len(geo_df)
     total_acquisitions = int(geo_df["acquisition"].sum())
