@@ -884,9 +884,26 @@ def get_all_campaigns_for_onboarding(raw_df, saved_mappings, ignored_list):
 # Incrementality Testing - Geo Data Simulation
 # =========================================================
 
-# Representative ZIP -> (state, dma_code, dma_name) mapping for simulation
-# In production, use a full ZIP-to-DMA lookup (e.g., from BigQuery or a TSV reference file)
-ZIP_DMA_LOOKUP = {
+# Full ZIP -> (state, dma_code, dma_name) mapping loaded from bundled CSV (41k+ ZIPs)
+# Fallback to small embedded dict if file not found
+def _load_zip_dma_lookup():
+    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "zip_to_dma.csv")
+    if os.path.exists(csv_path):
+        try:
+            df = pd.read_csv(csv_path, dtype={"zip_code": str, "dma_code": str})
+            df["zip_code"] = df["zip_code"].str.zfill(5)
+            lookup = {}
+            for _, row in df.iterrows():
+                try:
+                    dma_code_int = int(row["dma_code"])
+                except (ValueError, TypeError):
+                    dma_code_int = 0
+                lookup[row["zip_code"]] = (None, dma_code_int, str(row["dma_name"]))
+            return lookup
+        except Exception:
+            pass
+    # Minimal fallback if CSV missing
+    return {
     "10001": ("NY", 501, "NEW YORK"),
     "10002": ("NY", 501, "NEW YORK"),
     "10003": ("NY", 501, "NEW YORK"),
@@ -971,7 +988,9 @@ ZIP_DMA_LOOKUP = {
     "64102": ("MO", 616, "KANSAS CITY"),
     "84101": ("UT", 770, "SALT LAKE CITY"),
     "84102": ("UT", 770, "SALT LAKE CITY"),
-}
+    }
+
+ZIP_DMA_LOOKUP = _load_zip_dma_lookup()
 
 ALL_SIM_ZIPS = list(ZIP_DMA_LOOKUP.keys())
 
