@@ -45,6 +45,7 @@ from data_simulator import (
     aggregate_geo_for_geolift,
     get_unmatched_zips,
     normalize_zip,
+    zip_to_dma,
     ZIP_DMA_LOOKUP,
 )
 
