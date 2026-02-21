@@ -2735,17 +2735,18 @@ elif page == "Geo Lift Export":
 
             # Aggregate: one row per date + DMA (unique as GeoLift requires)
             matched_df["_date"] = matched_df[date_col].astype(str)
-            matched_df["dma_code"] = matched_df["dma_code"].fillna(0).astype(int)
             geolift_out = (
                 matched_df
-                .groupby(["_date", "dma_code", "dma_name"], as_index=False)["Y"]
+                .groupby(["_date", "dma_name"], as_index=False)["Y"]
                 .sum()
             )
+            # GeoLift format: location (lowercase), Y, date
+            geolift_out["location"] = geolift_out["dma_name"].str.lower()
             geolift_out = geolift_out.rename(columns={"_date": "date"})
-            geolift_out = geolift_out[geolift_out["Y"] > 0].sort_values(["date", "dma_name"])
+            geolift_out = geolift_out[geolift_out["Y"] > 0][["location", "Y", "date"]].sort_values(["date", "location"])
 
             # Stats on final output
-            n_dmas = geolift_out["dma_name"].nunique()
+            n_dmas = geolift_out["location"].nunique()
             n_dates = geolift_out["date"].nunique()
             st.markdown(f"""
             <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:10px;
@@ -2777,7 +2778,7 @@ elif page == "Geo Lift Export":
             with dl2:
                 geolift_csv = geolift_out.to_csv(index=False)
                 st.download_button(
-                    label="Download GeoLift Format (date, dma_code, dma_name, Y)",
+                    label="Download GeoLift Format (location, Y, date)",
                     data=geolift_csv,
                     file_name="geolift_dma_daily.csv",
                     mime="text/csv",
