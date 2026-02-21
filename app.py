@@ -2660,12 +2660,18 @@ elif page == "Geo Lift Export":
 
         if upload_df is not None and len(upload_df) > 0:
             # Let user pick which column is the ZIP
-            up1, up2 = st.columns([2, 2])
+            up1, up2, up3 = st.columns([2, 2, 2])
             with up1:
                 zip_col = st.selectbox("Which column contains ZIP codes?", upload_df.columns.tolist(), key="upload_zip_col")
             with up2:
-                value_col_options = ["-- row count (1 per row) --"] + [c for c in upload_df.columns if c != zip_col]
-                value_col = st.selectbox("Which column is the Y value (optional)?", value_col_options, key="upload_val_col")
+                # Try to auto-detect date column
+                date_col_guess = next((c for c in upload_df.columns if "date" in c.lower()), upload_df.columns[0])
+                date_col_options = upload_df.columns.tolist()
+                date_col_idx = date_col_options.index(date_col_guess) if date_col_guess in date_col_options else 0
+                date_col = st.selectbox("Which column is the date?", date_col_options, index=date_col_idx, key="upload_date_col")
+            with up3:
+                value_col_options = ["-- row count (1 per row) --"] + [c for c in upload_df.columns if c not in (zip_col, date_col)]
+                value_col = st.selectbox("Which column is the Y value?", value_col_options, key="upload_val_col")
 
             # Normalize ZIPs and look up DMA
             upload_df["_zip5"] = upload_df[zip_col].apply(normalize_zip)
@@ -2719,13 +2725,43 @@ elif page == "Geo Lift Export":
             # Preview
             st.dataframe(upload_df.head(50), use_container_width=True, height=280)
 
-            # Build GeoLift-format output (grouped by dma_name + date if date col exists)
+            # Build GeoLift-format output -- daily totals by DMA
             matched_df = upload_df[upload_df["dma_name"].notna()].copy()
 
             if value_col == "-- row count (1 per row) --":
                 matched_df["Y"] = 1
             else:
                 matched_df["Y"] = pd.to_numeric(matched_df[value_col], errors="coerce").fillna(0)
+
+            # Aggregate: one row per date + DMA (unique as GeoLift requires)
+            matched_df["_date"] = matched_df[date_col].astype(str)
+            matched_df["dma_code"] = matched_df["dma_code"].fillna(0).astype(int)
+            geolift_out = (
+                matched_df
+                .groupby(["_date", "dma_code", "dma_name"], as_index=False)["Y"]
+                .sum()
+            )
+            geolift_out = geolift_out.rename(columns={"_date": "date"})
+            geolift_out = geolift_out[geolift_out["Y"] > 0].sort_values(["date", "dma_name"])
+
+            # Stats on final output
+            n_dmas = geolift_out["dma_name"].nunique()
+            n_dates = geolift_out["date"].nunique()
+            st.markdown(f"""
+            <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:10px;
+                        padding:0.85rem 1.25rem; margin:0.75rem 0; display:flex; gap:2rem;">
+                <div><span style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:#7c3aed;">Output Rows</span>
+                <div style="font-size:1.2rem; font-weight:800; color:#0f172a;">{len(geolift_out):,}</div></div>
+                <div><span style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:#7c3aed;">Unique DMAs</span>
+                <div style="font-size:1.2rem; font-weight:800; color:#0f172a;">{n_dmas}</div></div>
+                <div><span style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:#7c3aed;">Unique Dates</span>
+                <div style="font-size:1.2rem; font-weight:800; color:#0f172a;">{n_dates}</div></div>
+                <div><span style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:#7c3aed;">Total Y</span>
+                <div style="font-size:1.2rem; font-weight:800; color:#0f172a;">{int(geolift_out['Y'].sum()):,}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.dataframe(geolift_out.head(30), use_container_width=True, height=250)
 
             dl1, dl2 = st.columns(2)
             with dl1:
@@ -2739,14 +2775,11 @@ elif page == "Geo Lift Export":
                     use_container_width=True,
                 )
             with dl2:
-                geolift_out = matched_df[["dma_name", "Y"]].groupby("dma_name", as_index=False)["Y"].sum()
-                geolift_out = geolift_out.rename(columns={"dma_name": "location"})
-                geolift_out = geolift_out[geolift_out["Y"] > 0].sort_values("location")
                 geolift_csv = geolift_out.to_csv(index=False)
                 st.download_button(
-                    label="Download GeoLift Format (location, Y)",
+                    label="Download GeoLift Format (date, dma_code, dma_name, Y)",
                     data=geolift_csv,
-                    file_name="zip_to_dma_geolift.csv",
+                    file_name="geolift_dma_daily.csv",
                     mime="text/csv",
                     key="dl_upload_geolift",
                     use_container_width=True,
