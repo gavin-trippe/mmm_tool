@@ -2735,15 +2735,16 @@ elif page == "Geo Lift Export":
 
             # Aggregate: one row per date + DMA (unique as GeoLift requires)
             matched_df["_date"] = matched_df[date_col].astype(str)
+            matched_df["dma_code"] = matched_df["dma_code"].fillna(0).astype(int)
             geolift_out = (
                 matched_df
-                .groupby(["_date", "dma_name"], as_index=False)["Y"]
+                .groupby(["_date", "dma_code", "dma_name"], as_index=False)["Y"]
                 .sum()
             )
-            # GeoLift format: location (lowercase), Y, date
+            # GeoLift format: location (lowercase), Y, date + dma_code and dma_name for reference
             geolift_out["location"] = geolift_out["dma_name"].str.lower()
             geolift_out = geolift_out.rename(columns={"_date": "date"})
-            geolift_out = geolift_out[geolift_out["Y"] > 0][["location", "Y", "date"]].sort_values(["date", "location"])
+            geolift_out = geolift_out[geolift_out["Y"] > 0][["location", "Y", "date", "dma_code", "dma_name"]].sort_values(["date", "location"])
 
             # Stats on final output
             n_dmas = geolift_out["location"].nunique()
